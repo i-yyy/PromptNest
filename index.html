@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f5f0">
+  <title>词匣 · 提示词库</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="#" aria-label="词匣首页"><span class="brand-mark">匣</span><span>词匣<span class="brand-sub">PROMPT LIBRARY</span></span></a>
+      <button class="primary-button new-prompt"><span>＋</span> 新建提示词</button>
+      <nav class="nav-group">
+        <p class="nav-label">我的空间</p>
+        <button class="nav-item active" data-view="all"><span class="nav-icon">▤</span>全部提示词 <span class="nav-count" id="all-count">0</span></button>
+        <button class="nav-item" data-view="favorite"><span class="nav-icon">☆</span>我的收藏 <span class="nav-count" id="favorite-count">0</span></button>
+        <button class="nav-item" data-view="recent"><span class="nav-icon">◷</span>最近更新</button>
+        <button class="nav-item" data-view="archive"><span class="nav-icon">▱</span>已归档</button>
+      </nav>
+      <div class="category-block">
+        <div class="category-heading"><p class="nav-label">分类</p><button id="add-category" class="icon-button small" aria-label="添加分类" title="添加分类">＋</button></div>
+        <div id="category-list" class="category-list"></div>
+      </div>
+      <div class="sidebar-bottom"><div class="storage-note"><span class="status-dot"></span><span>仅保存在此设备</span></div><button id="open-backup" class="backup-link"><span>⇧</span> 导入 / 导出数据</button></div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar"><div class="breadcrumb"><span>个人空间</span><span class="slash">/</span><strong id="view-title">全部提示词</strong></div><div class="topbar-actions"><span class="local-badge"><i></i> 本地模式</span><button class="avatar" aria-label="个人空间">林</button></div></header>
+      <section class="content-area">
+        <div class="page-heading"><div><p class="eyebrow">PROMPT LIBRARY <span>·</span> 让好想法随手可用</p><h1 id="heading-title">全部提示词 <span class="heading-count" id="heading-count">0</span></h1><p class="page-description">把反复验证过的好提示，收进一个随时找得到的地方。</p></div><button class="primary-button desktop-new new-prompt"><span>＋</span> 新建提示词</button></div>
+        <div class="toolbar"><label class="search-box"><span class="search-icon">⌕</span><input id="search" type="search" placeholder="搜索提示词、标签或场景…" autocomplete="off"><kbd>⌘ K</kbd></label><label class="select-wrap"><span class="filter-icon">☷</span><select id="sort"><option value="updated">最近更新</option><option value="title">按标题排序</option><option value="favorite">收藏优先</option></select></label></div>
+        <div class="active-filters" id="active-filters"></div>
+        <div class="prompt-grid" id="prompt-grid" aria-live="polite"></div>
+        <div class="empty-state" id="empty-state" hidden><div class="empty-art"><span>✳</span><span>✦</span><span>▤</span></div><h2 id="empty-title">你的提示词库还是空的</h2><p id="empty-copy">把那些好用的提示词收进来，下次就不用再找一遍。</p><button class="primary-button new-prompt">＋ 创建第一条提示词</button></div>
+      </section>
+      <footer class="footer"><span>词匣 <span class="footer-dot">·</span> 让灵感有迹可循</span><span>你的内容只保存在当前浏览器</span></footer>
+    </main>
+  </div>
+
+  <dialog id="prompt-dialog" class="modal"><form id="prompt-form" method="dialog"><div class="modal-head"><div><p class="eyebrow">PROMPT DETAILS</p><h2 id="prompt-dialog-title">新建提示词</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div><input type="hidden" id="prompt-id"><label class="field"><span>标题 <b>*</b></span><input id="prompt-title" maxlength="100" required placeholder="给这条提示词起个容易记住的名字"></label><label class="field"><span>提示词正文 <b>*</b><small>支持用 {{变量名}} 创建可填写的模板</small></span><textarea id="prompt-content" rows="8" required placeholder="例如：请围绕 {{主题}}，为 {{读者}} 写一篇…"></textarea><span id="variable-hint" class="field-hint">输入 {{变量名}}，使用时会自动生成填写项</span></label><div class="field-row"><label class="field"><span>分类</span><input id="prompt-category" list="category-options" placeholder="例如：写作"><datalist id="category-options"></datalist></label><label class="field"><span>适用模型 <small>选填</small></span><input id="prompt-model" placeholder="例如：通用"></label></div><label class="field"><span>标签 <small>用逗号分隔</small></span><input id="prompt-tags" placeholder="例如：小红书, 文案, 灵感"></label><label class="field"><span>适用场景 <small>选填</small></span><input id="prompt-description" maxlength="180" placeholder="一句话说明它适合什么时候使用"></label><div class="modal-actions"><button type="button" class="text-button close-dialog">取消</button><button type="submit" class="primary-button">保存提示词</button></div></form></dialog>
+
+  <dialog id="use-dialog" class="modal use-modal"><form method="dialog"><div class="modal-head"><div><p class="eyebrow">FILL IN & COPY</p><h2 id="use-title">使用提示词</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div><div id="variable-fields" class="variable-fields"></div><label class="field"><span>生成预览</span><textarea id="prompt-preview" rows="8" readonly></textarea></label><div class="modal-actions"><span class="field-hint">填好变量后，复制生成的提示词。</span><button type="button" id="copy-generated" class="primary-button">复制提示词</button></div></form></dialog>
+
+  <dialog id="backup-dialog" class="modal compact-modal"><form method="dialog"><div class="modal-head"><div><p class="eyebrow">YOUR DATA</p><h2>导入 / 导出</h2></div><button type="button" class="icon-button close-dialog" aria-label="关闭">×</button></div><p class="modal-description">数据目前保存在此浏览器。建议定期导出 JSON 文件作为备份。</p><div class="backup-actions"><button type="button" id="export-data" class="secondary-button"><span>↓</span><span><b>导出备份</b><small>下载完整 JSON 文件</small></span></button><label class="secondary-button import-button"><span>↑</span><span><b>导入备份</b><small>合并或替换当前数据</small></span><input id="import-file" type="file" accept="application/json,.json" hidden></label></div><div id="import-preview" class="import-preview" hidden></div><div id="import-choice" class="import-choice" hidden><p class="field-hint">选择导入方式</p><div><button type="button" id="merge-import" class="secondary-button">合并数据</button><button type="button" id="replace-import" class="danger-button">替换现有数据</button></div></div></form></dialog>
+
+  <dialog id="detail-dialog" class="modal detail-modal"><div id="detail-content"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

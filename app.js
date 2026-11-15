@@ -20,6 +20,24 @@
     if (state.categories.includes(path)) { showToast('这个文件夹已经存在'); return; }
     state.categories.push(path); state.view = 'all'; state.category = path; save(); showToast('文件夹已创建');
   };
+  const deleteFolder = path => {
+    const folderPaths = state.categories.filter(item => item === path || item.startsWith(`${path} / `));
+    const removedPrompts = state.prompts.filter(prompt => prompt.category === path || prompt.category.startsWith(`${path} / `));
+    const childFolders = folderPaths.length - 1;
+    if (removedPrompts.length || childFolders) {
+      const details = [
+        removedPrompts.length ? `${removedPrompts.length} 条提示词` : '',
+        childFolders ? `${childFolders} 个子文件夹` : ''
+      ].filter(Boolean).join('和');
+      if (!confirm(`删除“${path}”及其中的 ${details}？此操作会同步删除云端数据，无法撤销。`)) return;
+    }
+    const removedPaths = new Set(folderPaths);
+    state.categories = state.categories.filter(item => !removedPaths.has(item));
+    state.prompts = state.prompts.filter(prompt => !(prompt.category === path || prompt.category.startsWith(`${path} / `)));
+    if (state.category && (state.category === path || state.category.startsWith(`${path} / `))) state.category = '';
+    save();
+    showToast(removedPrompts.length ? '文件夹及其中内容已删除' : '文件夹已删除');
+  };
   const variablesIn = content => [...new Set([...content.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1].trim()).filter(Boolean))];
   const seed = [
     { id: crypto.randomUUID(), title: '把复杂概念讲给初学者', content: '请把「{{概念}}」解释给刚接触这个领域的{{读者}}。\n\n要求：\n- 先用一句话概括\n- 用一个生活中的例子说明\n- 解释最容易混淆的地方\n- 最后给出 3 个可以继续探索的问题', category: '学习', tags: ['解释', '入门', '学习'], description: '把专业知识转成清晰易懂的讲解。', model: '通用', favorite: true, archived: false, createdAt: Date.now() - 86400000 * 4, updatedAt: Date.now() - 86400000 * 1.2 },
@@ -51,7 +69,7 @@
     const categories = [...new Set(categoryPaths)].sort((a,b) => a.localeCompare(b, 'zh-CN'));
     $('#category-list').innerHTML = categories.map(cat => {
       const label = cat.split(' / ').at(-1); const total = state.prompts.filter(p => !p.archived && promptIsInside(p, cat)).length;
-      return `<div class="category-row" style="--folder-depth:${folderDepth(cat)}"><button class="category-item ${state.category === cat ? 'selected' : ''}" data-category="${esc(cat)}" title="${esc(cat)}"><span class="category-dot"></span><span class="category-name">${esc(label)}</span><span class="category-total">${total}</span></button><button class="category-child-create" data-add-subcategory="${esc(cat)}" title="在 ${esc(cat)} 中新建子文件夹" aria-label="在 ${esc(cat)} 中新建子文件夹">＋</button></div>`;
+      return `<div class="category-row" style="--folder-depth:${folderDepth(cat)}"><button class="category-item ${state.category === cat ? 'selected' : ''}" data-category="${esc(cat)}" title="${esc(cat)}"><span class="category-dot"></span><span class="category-name">${esc(label)}</span><span class="category-total">${total}</span></button><button class="category-child-create" data-add-subcategory="${esc(cat)}" title="在 ${esc(cat)} 中新建子文件夹" aria-label="在 ${esc(cat)} 中新建子文件夹">＋</button><button class="category-delete" data-delete-category="${esc(cat)}" title="删除文件夹 ${esc(cat)}" aria-label="删除文件夹 ${esc(cat)}">×</button></div>`;
     }).join('') || '<p class="category-empty">保存提示词后自动整理</p>';
     $('#category-options').innerHTML = categories.map(cat => `<option value="${esc(cat)}"></option>`).join('');
     $('#all-count').textContent = state.prompts.filter(p => !p.archived).length;
@@ -249,6 +267,7 @@
     const target = event.target.closest('button, [data-detail]'); if (!target) return;
     if (target.matches('.new-prompt')) openEdit();
     else if (target.matches('.nav-item')) { state.view = target.dataset.view; state.category = ''; render(); }
+    else if (target.dataset.deleteCategory !== undefined) deleteFolder(target.dataset.deleteCategory);
     else if (target.dataset.addSubcategory !== undefined) createFolder(target.dataset.addSubcategory);
     else if (target.dataset.category) { state.view = 'all'; state.category = state.category === target.dataset.category ? '' : target.dataset.category; render(); }
     else if (target.dataset.clearCategory !== undefined) { state.category = ''; render(); }

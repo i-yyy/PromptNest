@@ -38,6 +38,14 @@
     save();
     showToast(removedPrompts.length ? '文件夹及其中内容已删除' : '文件夹已删除');
   };
+  const deletePrompt = id => {
+    const prompt = state.prompts.find(item => item.id === id);
+    if (!prompt || !confirm(`确定删除“${prompt.title}”吗？删除后无法恢复。`)) return;
+    state.prompts = state.prompts.filter(item => item.id !== id);
+    $('#detail-dialog').close();
+    save();
+    showToast('提示词已删除');
+  };
   const variablesIn = content => [...new Set([...content.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1].trim()).filter(Boolean))];
   const seed = [
     { id: crypto.randomUUID(), title: '把复杂概念讲给初学者', content: '请把「{{概念}}」解释给刚接触这个领域的{{读者}}。\n\n要求：\n- 先用一句话概括\n- 用一个生活中的例子说明\n- 解释最容易混淆的地方\n- 最后给出 3 个可以继续探索的问题', category: '学习', tags: ['解释', '入门', '学习'], description: '把专业知识转成清晰易懂的讲解。', model: '通用', favorite: true, archived: false, createdAt: Date.now() - 86400000 * 4, updatedAt: Date.now() - 86400000 * 1.2 },
@@ -80,7 +88,7 @@
     const items = visiblePrompts(); $('#heading-count').textContent = items.length;
     $$('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.view === state.view && !state.category));
     const grid = $('#prompt-grid');
-    grid.innerHTML = items.map((p, index) => `<article class="prompt-card" style="--card-index:${index}" data-id="${esc(p.id)}"><div class="card-top"><span class="card-category"><i></i>${esc(p.category || '未分类')}</span><button class="favorite-button ${p.favorite ? 'is-favorite' : ''}" data-favorite="${esc(p.id)}" title="${p.favorite ? '取消收藏' : '加入收藏'}">${p.favorite ? '★' : '☆'}</button></div><button class="card-main" data-detail="${esc(p.id)}"><h3>${esc(p.title)}</h3><p class="card-description">${esc(p.description || p.content.replace(/\s+/g, ' '))}</p><div class="card-preview">${esc(p.content.slice(0, 190))}${p.content.length > 190 ? '…' : ''}</div></button><div class="card-tags">${(p.tags || []).slice(0, 3).map(tag => `<span class="tag"># ${esc(tag)}</span>`).join('')}${(p.tags || []).length > 3 ? `<span class="tag-more">+${p.tags.length - 3}</span>` : ''}</div><div class="card-footer"><span>${p.model ? `<span class="model-dot">✳</span> ${esc(p.model)}` : '<span>提示词'}</span><span>${date(p.updatedAt)}</span></div><div class="card-hover-actions"><button data-copy="${esc(p.id)}">复制 ↗</button><button data-edit="${esc(p.id)}">编辑</button></div></article>`).join('');
+    grid.innerHTML = items.map((p, index) => `<article class="prompt-card" style="--card-index:${index}" data-id="${esc(p.id)}"><div class="card-top"><span class="card-category"><i></i>${esc(p.category || '未分类')}</span><button class="favorite-button ${p.favorite ? 'is-favorite' : ''}" data-favorite="${esc(p.id)}" title="${p.favorite ? '取消收藏' : '加入收藏'}">${p.favorite ? '★' : '☆'}</button></div><button class="card-main" data-detail="${esc(p.id)}"><h3>${esc(p.title)}</h3><p class="card-description">${esc(p.description || p.content.replace(/\s+/g, ' '))}</p><div class="card-preview">${esc(p.content.slice(0, 190))}${p.content.length > 190 ? '…' : ''}</div></button><div class="card-tags">${(p.tags || []).slice(0, 3).map(tag => `<span class="tag"># ${esc(tag)}</span>`).join('')}${(p.tags || []).length > 3 ? `<span class="tag-more">+${p.tags.length - 3}</span>` : ''}</div><div class="card-footer"><span>${p.model ? `<span class="model-dot">✳</span> ${esc(p.model)}` : '<span>提示词'}</span><span>${date(p.updatedAt)}</span></div><div class="card-hover-actions"><button data-copy="${esc(p.id)}">复制 ↗</button><button data-edit="${esc(p.id)}">编辑</button><button data-delete="${esc(p.id)}">删除</button></div></article>`).join('');
     const empty = items.length === 0; $('#empty-state').hidden = !empty; grid.hidden = empty;
     if (empty) {
       const filtered = state.query || state.category || ['favorite','archive'].includes(state.view);
@@ -291,6 +299,7 @@
     const card = event.target.closest('.prompt-card'); if (!card) return;
     if (event.target.closest('[data-copy]')) { const prompt = state.prompts.find(p => p.id === card.dataset.id); if (prompt) copyText(prompt.content, prompt.id); }
     else if (event.target.closest('[data-edit]')) openEdit(state.prompts.find(p => p.id === card.dataset.id));
+    else if (event.target.closest('[data-delete]')) deletePrompt(card.dataset.id);
     else if (event.target.closest('[data-favorite]')) { const p = state.prompts.find(x => x.id === card.dataset.id); p.favorite = !p.favorite; p.updatedAt = Date.now(); save(); }
     else if (event.target.closest('[data-detail]')) openDetail(card.dataset.id);
   });
@@ -300,7 +309,7 @@
     if (target.dataset.use) openUse(id);
     else if (target.dataset.edit) openEdit(state.prompts.find(p => p.id === id));
     else if (target.dataset.archive) { const p = state.prompts.find(x => x.id === id); p.archived = !p.archived; p.updatedAt = Date.now(); $('#detail-dialog').close(); save(); showToast(p.archived ? '已归档' : '已取消归档'); }
-    else if (confirm('确定删除这条提示词吗？删除后无法恢复。')) { state.prompts = state.prompts.filter(p => p.id !== id); $('#detail-dialog').close(); save(); showToast('提示词已删除'); }
+    else if (target.dataset.delete) deletePrompt(id);
     if (!target.dataset.archive && !target.dataset.delete) $('#detail-dialog').close();
   });
   $('#export-data').addEventListener('click', () => {

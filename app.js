@@ -3,9 +3,10 @@
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const state = { prompts: [], categories: [], view: 'all', category: '', query: '', sort: 'updated', importData: null, importCategories: [] };
+  let enqueueCloudSync = () => {};
   const esc = (value = '') => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const date = value => new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(value));
-  const save = () => { state.categories = [...new Set([...state.categories, ...state.prompts.map(p => p.category).filter(Boolean)])]; localStorage.setItem(KEY, JSON.stringify(state.prompts)); localStorage.setItem(`${KEY}-categories`, JSON.stringify(state.categories)); render(); };
+  const save = () => { state.categories = [...new Set([...state.categories, ...state.prompts.map(p => p.category).filter(Boolean)])]; localStorage.setItem(KEY, JSON.stringify(state.prompts)); localStorage.setItem(`${KEY}-categories`, JSON.stringify(state.categories)); render(); enqueueCloudSync(); };
   const showToast = message => { const toast = $('#toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.remove('show'), 2300); };
   const parseTags = value => value.split(/[,，、]/).map(tag => tag.trim()).filter(Boolean).filter((tag, i, all) => all.indexOf(tag) === i);
   const folderDepth = path => path.split(' / ').length - 1;
@@ -73,6 +74,142 @@
     if (state.category) filterChips.push(`<button data-clear-category>分类：${esc(state.category)} <span>×</span></button>`);
     if (state.query) filterChips.push(`<button data-clear-search>搜索：${esc(state.query)} <span>×</span></button>`);
     $('#active-filters').innerHTML = filterChips.join('');
+  };
+  const setConnectionStatus = (label, mode = '') => {
+    const badge = $('#connection-status');
+    if (!badge) return;
+    badge.innerHTML = `<i></i> ${esc(label)}`;
+    badge.title = label;
+    badge.dataset.state = mode;
+  };
+  const cloudConfig = window.PROMPTNEST_SUPABASE;
+  const cloudUrl = cloudConfig?.url?.replace(/\/$/, '');
+  const cloudHeaders = cloudConfig?.publishableKey ? {
+    apikey: cloudConfig.publishableKey,
+    Authorization: `Bearer ${cloudConfig.publishableKey}`,
+    'Content-Type': 'application/json'
+  } : null;
+  const cloudRequest = async (table, query = '', options = {}) => {
+    const response = await fetch(`${cloudUrl}/rest/v1/${table}${query ? `?${query}` : ''}`, {
+      ...options,
+      headers: { ...cloudHeaders, ...(options.headers || {}) }
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`${response.status} ${detail}`);
+    }
+    if (response.status === 204) return null;
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
+  };
+  const promptToRow = p => ({
+    id: p.id, title: p.title, content: p.content, category: p.category || '', model: p.model || '',
+    tags: Array.isArray(p.tags) ? p.tags : [], description: p.description || '', favorite: Boolean(p.favorite),
+    archived: Boolean(p.archived), created_at: Number(p.createdAt) || Date.now(),
+    updated_at: Number(p.updatedAt) || Date.now(), last_used_at: Number(p.lastUsedAt) || null
+  });
+  const rowToPrompt = p => ({
+    id: p.id, title: p.title, content: p.content, category: p.category || '', model: p.model || '',
+    tags: Array.isArray(p.tags) ? p.tags : [], description: p.description || '', favorite: Boolean(p.favorite),
+    archived: Boolean(p.archived), createdAt: Number(p.created_at) || Date.now(),
+    updatedAt: Number(p.updated_at) || Date.now(), lastUsedAt: p.last_used_at == null ? null : Number(p.last_used_at)
+  });
+  const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const sameMap = (a, b) => a.size === b.size && [...a].every(([key, value]) => sameJson(value, b.get(key)));
+  const upsertRows = async (table, rows, conflict) => {
+    if (!rows.length) return;
+    await cloudRequest(table, `on_conflict=${conflict}`, {
+      method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows)
+    });
+  };
+  const deleteRows = async (table, column, values) => {
+    if (!values.length) return;
+    const inFilter = values.map(value => `"${String(value).replaceAll('"', '\\"')}"`).join(',');
+    await cloudRequest(table, `${column}=in.(${encodeURIComponent(inFilter)})`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+  };
+  let cloudReady = false;
+  let cloudQueue = Promise.resolve();
+  let syncedPrompts = new Map();
+  let syncedCategories = new Set();
+  const syncToCloud = async () => {
+    if (!cloudReady) return;
+    const current = new Map(state.prompts.map(p => [p.id, promptToRow(p)]));
+    const changed = [...current].filter(([id, row]) => !sameJson(row, syncedPrompts.get(id))).map(([, row]) => row);
+    await upsertRows('prompts', changed, 'id');
+    await deleteRows('prompts', 'id', [...syncedPrompts.keys()].filter(id => !current.has(id)));
+    const categories = new Set(state.categories);
+    await upsertRows('prompt_categories', [...categories].filter(path => !syncedCategories.has(path)).map(path => ({ path })), 'path');
+    await deleteRows('prompt_categories', 'path', [...syncedCategories].filter(path => !categories.has(path)));
+    syncedPrompts = current;
+    syncedCategories = categories;
+    setConnectionStatus('云端已同步', 'online');
+  };
+  enqueueCloudSync = () => {
+    if (!cloudReady) return;
+    cloudQueue = cloudQueue.then(syncToCloud).catch(error => {
+      console.error('Supabase sync failed:', error);
+      setConnectionStatus('同步失败，点击查看', 'error');
+      const badge = $('#connection-status');
+      if (badge) badge.title = `云端同步失败：${error.message}`;
+    });
+  };
+  const initializeCloud = async () => {
+    if (!cloudUrl || !cloudHeaders) {
+      setConnectionStatus('仅此设备', 'offline');
+      return;
+    }
+    try {
+      const [remotePrompts, remoteCategories] = await Promise.all([
+        cloudRequest('prompts', 'select=*&order=updated_at.desc'),
+        cloudRequest('prompt_categories', 'select=path&order=path.asc')
+      ]);
+      if (remotePrompts.length) {
+        state.prompts = remotePrompts.map(rowToPrompt);
+        state.categories = remoteCategories.map(row => row.path);
+        state.categories = [...new Set([...state.categories, ...state.prompts.map(p => p.category).filter(Boolean)])];
+        localStorage.setItem(KEY, JSON.stringify(state.prompts));
+        localStorage.setItem(`${KEY}-categories`, JSON.stringify(state.categories));
+      } else {
+        state.categories = [...new Set([...state.categories, ...state.prompts.map(p => p.category).filter(Boolean)])];
+      }
+      syncedPrompts = new Map(remotePrompts.map(row => [row.id, row]));
+      syncedCategories = new Set(remoteCategories.map(row => row.path));
+      cloudReady = true;
+      if (!remotePrompts.length && state.prompts.length) await syncToCloud();
+      else setConnectionStatus('云端已同步', 'online');
+      render();
+      setInterval(async () => {
+        const localPromptMap = new Map(state.prompts.map(p => [p.id, promptToRow(p)]));
+        const localCategorySet = new Set(state.categories);
+        const hasLocalChanges = localPromptMap.size !== syncedPrompts.size || [...localPromptMap].some(([id, row]) => !sameJson(row, syncedPrompts.get(id))) ||
+          localCategorySet.size !== syncedCategories.size || [...localCategorySet].some(path => !syncedCategories.has(path));
+        if (!cloudReady || hasLocalChanges) return;
+        try {
+          const [latest, folders] = await Promise.all([
+            cloudRequest('prompts', 'select=*&order=updated_at.desc'), cloudRequest('prompt_categories', 'select=path&order=path.asc')
+          ]);
+          const nextPrompts = new Map(latest.map(row => [row.id, row]));
+          const nextCategories = new Set(folders.map(row => row.path));
+          if (sameMap(nextPrompts, syncedPrompts) && sameJson([...nextCategories].sort(), [...syncedCategories].sort())) return;
+          state.prompts = latest.map(rowToPrompt);
+          state.categories = [...new Set([...nextCategories, ...state.prompts.map(p => p.category).filter(Boolean)])];
+          syncedPrompts = nextPrompts;
+          syncedCategories = nextCategories;
+          localStorage.setItem(KEY, JSON.stringify(state.prompts));
+          localStorage.setItem(`${KEY}-categories`, JSON.stringify(state.categories));
+          render();
+          setConnectionStatus('云端已同步', 'online');
+        } catch (error) {
+          console.error('Supabase refresh failed:', error);
+          setConnectionStatus('云端连接中断', 'error');
+        }
+      }, 15000);
+    } catch (error) {
+      console.error('Supabase connection failed:', error);
+      setConnectionStatus('云端未配置，请运行 SQL', 'error');
+      const badge = $('#connection-status');
+      if (badge) badge.title = `连接失败：${error.message}。请确认已运行 supabase-setup.sql。`;
+    }
   };
   const openEdit = prompt => {
     $('#prompt-form').reset(); $('#prompt-id').value = prompt?.id || ''; $('#prompt-dialog-title').textContent = prompt ? '编辑提示词' : '新建提示词';
@@ -173,4 +310,5 @@
   });
   document.addEventListener('keydown', event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); $('#search').focus(); } });
   render();
+  initializeCloud();
 })();
